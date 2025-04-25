@@ -2,15 +2,16 @@ import React from 'react';
 import { Cell } from './game';
 
 interface Props {
-  cell: Cell
+  cell: Cell;
+  isWinning?: boolean;
 }
 
 class BoardCell extends React.Component<Props> {
   render(): React.ReactNode {
-    const playable = this.props.cell.playable ? 'playable' : '';
+    const className = `cell ${this.props.cell.playable ? 'playable' : ''} ${this.props.isWinning ? 'winning' : ''}`;
     return (
-      <div className={`cell ${playable}`}>{this.props.cell.text}</div>
-    )
+      <div className={className}>{this.props.cell.text}</div>
+    );
   }
 }
 

@@ -1,7 +1,9 @@
 package game;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.Stack;
 import fi.iki.elonen.NanoHTTPD;
 
 public class App extends NanoHTTPD {
@@ -15,16 +17,12 @@ public class App extends NanoHTTPD {
     }
 
     private Game game;
+    private Stack<Game> history;
 
-    /**
-     * Start the server at :8080 port.
-     * @throws IOException
-     */
     public App() throws IOException {
         super(8080);
-
         this.game = new Game();
-
+        this.history = new Stack<>();
         start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
         System.out.println("\nRunning!\n");
     }
@@ -33,15 +31,38 @@ public class App extends NanoHTTPD {
     public Response serve(IHTTPSession session) {
         String uri = session.getUri();
         Map<String, String> params = session.getParms();
-        if (uri.equals("/newgame")) {
-            this.game = new Game();
-        } else if (uri.equals("/play")) {
-            // e.g., /play?x=1&y=1
-            this.game = this.game.play(Integer.parseInt(params.get("x")), Integer.parseInt(params.get("y")));
+        GameState gameplay;
+
+        try {
+            if (uri.equals("/newgame")) {
+                this.history.clear();
+                this.game = new Game();
+            } else if (uri.equals("/play")) {
+                int x = Integer.parseInt(params.get("x"));
+                int y = Integer.parseInt(params.get("y"));
+                if (this.game.getBoard().getCell(x, y) == null && this.game.getWinner() == null) {
+                    this.history.push(this.game);
+                    this.game = this.game.play(x, y);
+                }
+            } else if (uri.equals("/undo")) {
+              
+                    this.game = this.history.undo();
+                
+            }
+
+            gameplay = GameState.forGame(this.game);
+            String response = String.format(
+                    "{\"cells\": %s, \"currentPlayer\": %d, \"winner\": %s, \"canUndo\": %b}",
+                    Arrays.toString(gameplay.getCells()),
+                    this.game.getPlayer().value,
+                    this.game.getWinner() != null ? this.game.getWinner().value : "null",
+                    !this.history.isEmpty());
+            return newFixedLengthResponse(response);
+        } catch (Exception e) {
+            System.err.println("Server error: " + e.getMessage());
+            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                    "{\"error\": \"Server error occurred\"}");
         }
-        // Extract the view-specific data from the game and apply it to the template.
-        GameState gameplay = GameState.forGame(this.game);
-        return newFixedLengthResponse(gameplay.toString());
     }
 
     public static class Test {

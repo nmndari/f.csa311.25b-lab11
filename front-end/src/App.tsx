@@ -1,127 +1,202 @@
 import React from 'react';
-import './App.css'; // import the css file to enable your styles.
+import './App.css';
 import { GameState, Cell } from './game';
 import BoardCell from './Cell';
 
-/**
- * Define the type of the props field for a React component
- */
 interface Props { }
 
-/**
- * Using generics to specify the type of props and state.
- * props and state is a special field in a React component.
- * React will keep track of the value of props and state.
- * Any time there's a change to their values, React will
- * automatically update (not fully re-render) the HTML needed.
- * 
- * props and state are similar in the sense that they manage
- * the data of this component. A change to their values will
- * cause the view (HTML) to change accordingly.
- * 
- * Usually, props is passed and changed by the parent component;
- * state is the internal value of the component and managed by
- * the component itself.
- */
-class App extends React.Component<Props, GameState> {
+interface State extends GameState {
+  currentPlayer: string;
+  winner: string | null;
+  canUndo: boolean;
+  winningCells: number[] | null;
+  history: { cells: Cell[]; player: string }[];
+  currentStep: number;
+}
+
+class App extends React.Component<Props, State> {
   private initialized: boolean = false;
 
-  /**
-   * @param props has type Props
-   */
   constructor(props: Props) {
-    super(props)
-    /**
-     * state has type GameState as specified in the class inheritance.
-     */
-    this.state = { cells: [] }
+    super(props);
+    this.state = { 
+      cells: [],
+      currentPlayer: 'X',
+      winner: null,
+      canUndo: false,
+      winningCells: null,
+      history: [],
+      currentStep: 0
+    };
   }
 
-  /**
-   * Use arrow function, i.e., () => {} to create an async function,
-   * otherwise, 'this' would become undefined in runtime. This is
-   * just an issue of Javascript.
-   */
   newGame = async () => {
-    const response = await fetch('/newgame');
-    const json = await response.json();
-    this.setState({ cells: json['cells'] });
-  }
-
-  /**
-   * play will generate an anonymous function that the component
-   * can bind with.
-   * @param x 
-   * @param y 
-   * @returns 
-   */
-  play(x: number, y: number): React.MouseEventHandler {
-    return async (e) => {
-      // prevent the default behavior on clicking a link; otherwise, it will jump to a new page.
-      e.preventDefault();
-      const response = await fetch(`/play?x=${x}&y=${y}`)
+    try {
+      const response = await fetch('/newgame');
       const json = await response.json();
-      this.setState({ cells: json['cells'] });
+      this.setState({ 
+        cells: json.cells,
+        currentPlayer: 'X',
+        winner: null,
+        canUndo: false,
+        winningCells: null,
+        history: [],
+        currentStep: 0
+      });
+    } catch (error) {
+      console.error('Failed to start new game:', error);
     }
   }
 
-  createCell(cell: Cell, index: number): React.ReactNode {
-    if (cell.playable)
-      /**
-       * key is used for React when given a list of items. It
-       * helps React to keep track of the list items and decide
-       * which list item need to be updated.
-       * @see https://reactjs.org/docs/lists-and-keys.html#keys
-       */
-      return (
-        <div key={index}>
-          <a href='/' onClick={this.play(cell.x, cell.y)}>
-            <BoardCell cell={cell}></BoardCell>
-          </a>
-        </div>
-      )
-    else
-      return (
-        <div key={index}><BoardCell cell={cell}></BoardCell></div>
-      )
+
+  undo = async () => {
+    const response = await fetch('/undo');
+    const json = await response.json();
+    const winner = this.checkWinner(json.cells);
+    const winningCells = winner && winner !== 'Draw' ? this.getWinningCells(json.cells) : null;
+  
+    const newHistory = this.state.history.slice(0, this.state.currentStep - 1);
+  
+    this.setState({
+      cells: json.cells,
+      currentPlayer: this.state.currentPlayer === 'X' ? 'O' : 'X',
+      winner,
+      winningCells,
+      canUndo: newHistory.length > 0,
+      history: newHistory,
+      currentStep: newHistory.length,
+    });
+  };
+  
+  
+  play(x: number, y: number): React.MouseEventHandler {
+    return async (e) => {
+      e.preventDefault();
+      try {
+        // 1. Хэрвээ ялагч байгаа бол цааш тоглохгүй
+        if (this.state.winner) return;
+  
+        // 2. Өмнөх төлвөө хадгалах
+        const historyCopy = [...this.state.history];
+        historyCopy.push({
+          cells: this.state.cells.map(cell => ({ ...cell })), // deep copy хийх хэрэгтэй
+          player: this.state.currentPlayer
+        });
+  
+        // 3. Сервер рүү хүсэлт явуулах
+        const response = await fetch(`/play?x=${x}&y=${y}`);
+        const json = await response.json();
+  
+        // 4. Шинэ төлвөөр ялагч шалгах
+        const winner = this.checkWinner(json.cells);
+        const winningCells = winner && winner !== 'Draw' ? this.getWinningCells(json.cells) : null;
+  
+        // 5. Шинэ төлвийг state-д оноох
+        this.setState({
+          cells: json.cells,
+          currentPlayer: this.state.currentPlayer === 'X' ? 'O' : 'X',
+          winner,
+          canUndo: true,
+          winningCells,
+          history: historyCopy,
+          currentStep: historyCopy.length, // Өмнөх түүхийг шинэчлэх
+        });
+      } catch (error) {
+        console.error('Failed to play:', error);
+      }
+    };
+  }
+  
+  
+  checkWinner(cells: Cell[]): string | null {
+    const winningCombinations = [
+      [0,1,2], [3,4,5], [6,7,8], // Rows
+      [0,3,6], [1,4,7], [2,5,8], // Columns
+      [0,4,8], [2,4,6] // Diagonals
+    ];
+
+    for (const combination of winningCombinations) {
+      const [a, b, c] = combination;
+      if (cells[a].text && 
+          cells[a].text === cells[b].text && 
+          cells[a].text === cells[c].text) {
+        return cells[a].text;
+      }
+    }
+    
+    return cells.every(cell => cell.text !== '') ? 'Draw' : null;
   }
 
-  /**
-   * This function will call after the HTML is rendered.
-   * We update the initial state by creating a new game.
-   * @see https://reactjs.org/docs/react-component.html#componentdidmount
-   */
+  getWinningCells(cells: Cell[]): number[] {
+    const winningCombinations = [
+      [0,1,2], [3,4,5], [6,7,8], // Rows
+      [0,3,6], [1,4,7], [2,5,8], // Columns
+      [0,4,8], [2,4,6] // Diagonals
+    ];
+
+    for (const combination of winningCombinations) {
+      const [a, b, c] = combination;
+      if (cells[a].text && 
+          cells[a].text === cells[b].text && 
+          cells[a].text === cells[c].text) {
+        return combination;
+      }
+    }
+    return [];
+  }
+
+  createCell(cell: Cell, index: number): React.ReactNode {
+    const isWinningCell = this.state.winningCells?.includes(index);
+    return (
+      <div key={index}>
+        {cell.playable && !this.state.winner ? (
+          <a href='/' onClick={this.play(cell.x, cell.y)}>
+            <BoardCell cell={cell} isWinning={isWinningCell} />
+          </a>
+        ) : (
+          <BoardCell cell={cell} isWinning={isWinningCell} />
+        )}
+      </div>
+    );
+  }
+
+  showHistory = () => {
+    console.log("Game History:");
+    this.state.history.forEach((step, index) => {
+      console.log(`Move ${index + 1} by ${step.player}:`);
+      step.cells.forEach((cell, i) => {
+        process.stdout.write(cell.text || '-');
+        if ((i + 1) % 3 === 0) console.log();
+      });
+      console.log('---');
+    });
+  };
+
   componentDidMount(): void {
-    /**
-     * setState in DidMount() will cause it to render twice which may cause
-     * this function to be invoked twice. Use initialized to avoid that.
-     */
     if (!this.initialized) {
       this.newGame();
       this.initialized = true;
     }
   }
 
-  /**
-   * The only method you must define in a React.Component subclass.
-   * @returns the React element via JSX.
-   * @see https://reactjs.org/docs/react-component.html
-   */
   render(): React.ReactNode {
-    /**
-     * We use JSX to define the template. An advantage of JSX is that you
-     * can treat HTML elements as code.
-     * @see https://reactjs.org/docs/introducing-jsx.html
-     */
+    const status = this.state.winner 
+      ? this.state.winner === 'Draw' 
+        ? 'Game Over: Draw!'
+        : `Winner: ${this.state.winner}!`
+      : `Current Player: ${this.state.currentPlayer}`;
+
     return (
-      <div>
-        <div id="board">
+      <div className="game-container">
+        <div id="instructions">{status}</div>
+        <div id="board" className={this.state.winner ? 'game-over' : ''}>
           {this.state.cells.map((cell, i) => this.createCell(cell, i))}
         </div>
         <div id="bottombar">
-          <button onClick={/* get the function, not call the function */this.newGame}>New Game</button>
-          {/* Exercise: implement Undo function */}
-          <button>Undo</button>
+          <button onClick={this.newGame}>New Game</button>
+          <button onClick={this.undo} disabled={!this.state.canUndo || this.state.winner !== null}>
+            Undo
+          </button>
         </div>
       </div>
     );

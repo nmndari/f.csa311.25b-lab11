@@ -25,14 +25,9 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
-                <version>1.2.1</version>
+                <version>3.1.0</version>
                 <configuration>
-                    <executable>java</executable>
-                    <arguments>
-                        <argument>-classpath</argument>
-                        <classpath/>
-                        <argument>game.App</argument>
-                    </arguments>
+                    <mainClass>game.App</mainClass>
                 </configuration>
             </plugin>
         </plugins>
